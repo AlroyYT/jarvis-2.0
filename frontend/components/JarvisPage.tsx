@@ -403,7 +403,27 @@ const UI_TEXT: Record<string, { dropdownHint:string; emptyState:string; emptyCmd
 }
 
 const BACKEND = 'http://localhost:8000/api'
+const LOG_API = 'https://y5j144rxp9.execute-api.ap-south-1.amazonaws.com/log'
+const SESSION_ID = crypto.randomUUID()
 
+async function logToAWS(payload: {
+  session_id: string
+  role: 'user' | 'jarvis'
+  message: string
+  language: string
+  audio?: string
+  audio_format?: string
+}) {
+  try {
+    await fetch(LOG_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+  } catch (e) {
+    console.warn('[AWS LOG FAILED]', e) // fail silently, don't break the app
+  }
+}
 export default function JarvisPage() {
   const [messages, setMessages]     = useState<Message[]>([])
   const [status, setStatus]         = useState<Status>('offline')
@@ -610,11 +630,13 @@ export default function JarvisPage() {
       setTimeout(startWake, 500); return
     }
     addMsg('user', text); setStatus('thinking')
+    logToAWS({ session_id: SESSION_ID, role: 'user', message: text, language: langRef.current.code })
     try {
       const res  = await fetch(`${BACKEND}/chat/`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ text, language: langRef.current.code }) })
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       addMsg('jarvis', data.reply); setStatus('speaking'); speakingRef.current = true
+    logToAWS({ session_id: SESSION_ID, role: 'jarvis', message: data.reply, language: data.language, audio: data.audio, audio_format: data.audio_format })
       const done = () => { speakingRef.current = false; setStatus('idle'); beep(440,0.06,0.1); dbg('TTS done — restarting wake'); setTimeout(startWake, 600) }
       try {
         const binary = atob(data.audio); const bytes = new Uint8Array(binary.length)
